@@ -19,6 +19,9 @@ create table if not exists public.tasks (
 
 create index if not exists tasks_user_id_idx on public.tasks (user_id);
 
+-- Phase 3: repeat rule, e.g. {"every": 1, "unit": "week", "weekdays": [1, 3]}
+alter table public.tasks add column if not exists repeat jsonb;
+
 -- Row Level Security: each signed-in user can only see and change their own tasks.
 alter table public.tasks enable row level security;
 

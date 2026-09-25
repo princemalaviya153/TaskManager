@@ -7,7 +7,7 @@ const STATUS = {
   error: { dot: 'bg-red-500', label: "Couldn't sync — retrying automatically" },
 }
 
-export default function AccountMenu({ email, status, onSignOut }) {
+export default function AccountMenu({ email, status, onSignOut, onChangePassword }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const s = STATUS[status] ?? STATUS.syncing
@@ -48,6 +48,16 @@ export default function AccountMenu({ email, status, onSignOut }) {
               {s.label}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              onChangePassword()
+            }}
+            className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            Change password
+          </button>
           <button
             type="button"
             onClick={onSignOut}

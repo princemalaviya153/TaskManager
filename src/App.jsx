@@ -9,7 +9,9 @@ import Toast from './components/Toast'
 import AccountMenu from './components/AccountMenu'
 import { supabase } from './lib/supabase'
 import { clearUserData } from './lib/storage'
-import { CalendarIcon, CheckCircleIcon, InboxIcon, SunIcon } from './components/Icons'
+import SetPasswordScreen from './components/SetPasswordScreen'
+import { nextDueAfterCompletion } from './lib/repeat'
+import { CalendarIcon, CheckCircleIcon, InboxIcon, SearchIcon, SunIcon, XIcon } from './components/Icons'
 
 const VIEWS = [
   { id: 'today', label: 'Today', Icon: SunIcon },
@@ -43,6 +45,9 @@ export default function App({ user }) {
   const [tag, setTag] = useState(null)
   const [editing, setEditing] = useState(null)
   const [toast, setToast] = useState(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [changingPassword, setChangingPassword] = useState(false)
   const dismissToast = useCallback(() => setToast(null), [])
 
   useEffect(() => {
@@ -73,6 +78,20 @@ export default function App({ user }) {
     return out
   }, [filtered, today])
 
+  const searchResults = useMemo(() => {
+    const q = query.trim().toLowerCase().replace(/^#/, '')
+    if (!q) return null
+    const hits = filtered.filter(
+      (t) => t.title.toLowerCase().includes(q) || t.notes.toLowerCase().includes(q) || t.tags.some((tag) => tag.includes(q)),
+    )
+    return { open: hits.filter((t) => !t.done).sort(compareTasks), done: hits.filter((t) => t.done) }
+  }, [filtered, query])
+
+  const closeSearch = () => {
+    setSearchOpen(false)
+    setQuery('')
+  }
+
   // Date a new task gets when none is typed or picked
   const defaultDue = { today, upcoming: toKey(addDays(fromKey(today), 1)) }[view] ?? null
 
@@ -87,9 +106,11 @@ export default function App({ user }) {
 
   const handleToggle = (id) => {
     const task = tasks.find((t) => t.id === id)
-    toggleTask(id)
+    const undo = toggleTask(id)
     if (task && !task.done) {
-      setToast({ message: 'Task completed', action: { label: 'Undo', run: () => toggleTask(id) } })
+      const next = task.repeat && nextDueAfterCompletion(task, today)
+      const message = next ? `Done · next: ${formatDay(next, today)}` : 'Task completed'
+      setToast({ message, action: { label: 'Undo', run: undo } })
     }
   }
 
@@ -125,7 +146,10 @@ export default function App({ user }) {
               <li key={id}>
                 <button
                   type="button"
-                  onClick={() => setView(id)}
+                  onClick={() => {
+                    setView(id)
+                    closeSearch()
+                  }}
                   aria-current={active ? 'page' : undefined}
                   className={`flex w-full flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition md:flex-row md:gap-3 md:rounded-xl md:px-3 md:py-2.5 md:text-sm ${
                     active
@@ -149,10 +173,40 @@ export default function App({ user }) {
             <h1 className="text-2xl font-bold tracking-tight">{current.label}</h1>
             {view === 'today' && <p className="text-sm text-slate-500 dark:text-slate-400">{formatLongDate(today)}</p>}
           </div>
-          <AccountMenu email={user.email} status={status} onSignOut={signOut} />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+              aria-label={searchOpen ? 'Close search' : 'Search tasks'}
+              aria-expanded={searchOpen}
+              className="grid size-10 place-items-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+            >
+              {searchOpen ? <XIcon width={20} height={20} /> : <SearchIcon width={20} height={20} />}
+            </button>
+            <AccountMenu
+              email={user.email}
+              status={status}
+              onSignOut={signOut}
+              onChangePassword={() => setChangingPassword(true)}
+            />
+          </div>
         </header>
 
-        {view !== 'done' && <QuickAdd onAdd={handleAdd} today={today} defaultDue={defaultDue} allTags={allTags} />}
+        {searchOpen && (
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && closeSearch()}
+            placeholder="Search titles, notes and #tags…"
+            aria-label="Search tasks"
+            autoFocus
+            enterKeyHint="search"
+            className="mb-3 w-full rounded-2xl bg-white px-4 py-3 text-base shadow-sm ring-1 ring-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-900 dark:ring-slate-800"
+          />
+        )}
+
+        {!searchResults && view !== 'done' && <QuickAdd onAdd={handleAdd} today={today} defaultDue={defaultDue} allTags={allTags} />}
 
         {allTags.length > 0 && (
           <div className="-mx-4 mt-3 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
@@ -174,15 +228,25 @@ export default function App({ user }) {
           </div>
         )}
 
-        {view === 'today' && <TodayView tasks={byView.today} doneToday={byView.done.filter((t) => t.completedAt === today)} {...itemProps} />}
-        {view === 'upcoming' && <UpcomingView tasks={byView.upcoming} {...itemProps} />}
-        {view === 'anytime' && (
+        {searchResults && (
+          <>
+            <TaskSection title="Results" tasks={searchResults.open} {...itemProps} />
+            <TaskSection title="Completed" tasks={searchResults.done} {...itemProps} />
+            {searchResults.open.length + searchResults.done.length === 0 && (
+              <Empty title="No matching tasks" text={`Nothing matches "${query.trim()}"${activeTag ? ` in #${activeTag}` : ''}.`} />
+            )}
+          </>
+        )}
+
+        {!searchResults && view === 'today' && <TodayView tasks={byView.today} doneToday={byView.done.filter((t) => t.completedAt === today)} {...itemProps} />}
+        {!searchResults && view === 'upcoming' && <UpcomingView tasks={byView.upcoming} {...itemProps} />}
+        {!searchResults && view === 'anytime' && (
           <>
             <TaskSection title="No due date" tasks={byView.anytime} {...itemProps} />
             {byView.anytime.length === 0 && <Empty title="Nothing here" text="Tasks without a due date show up here." />}
           </>
         )}
-        {view === 'done' && (
+        {!searchResults && view === 'done' && (
           <DoneView
             tasks={byView.done}
             onClear={() => {
@@ -197,6 +261,16 @@ export default function App({ user }) {
         <EditTaskSheet key={editing.id} task={editing} onSave={updateTask} onDelete={handleDelete} onClose={() => setEditing(null)} />
       )}
       {!editing && <Toast toast={toast} onDismiss={dismissToast} />}
+      {changingPassword && (
+        <SetPasswordScreen
+          title="Change password"
+          onCancel={() => setChangingPassword(false)}
+          onDone={() => {
+            setChangingPassword(false)
+            setToast({ message: 'Password changed' })
+          }}
+        />
+      )}
     </div>
   )
 }

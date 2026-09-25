@@ -11,10 +11,20 @@ import { applyPending, fetchTasks, pushOps } from '../lib/sync'
 import { supabase } from '../lib/supabase'
 import { createTask, isUuid, newId } from '../lib/tasks'
 import { todayKey } from '../lib/dates'
+import { firstOccurrence, nextDueAfterCompletion, sameRule, withAnchorDay } from '../lib/repeat'
 
 const RETRY_MS = 15_000
 
 const upsert = (task) => ({ type: 'upsert', id: task.id, task })
+
+// A repeating task always has a due date, and month/year rules remember the
+// due date's day of the month (reanchor when the date or rule was changed).
+function normalize(task, reanchor = true) {
+  if (!task.repeat) return task
+  const due = task.due ?? firstOccurrence(task.repeat, todayKey())
+  const rule = reanchor ? { ...task.repeat, day: undefined } : task.repeat
+  return { ...task, due, repeat: withAnchorDay(JSON.parse(JSON.stringify(rule)), due) }
+}
 
 // Local-first task list for one account: every change is applied on the device
 // immediately, queued, and pushed to Supabase in the background. Changes made
@@ -145,7 +155,7 @@ export function useTasks(userId) {
 
   const addTask = useCallback(
     (fields) => {
-      const task = createTask(fields)
+      const task = normalize(createTask(fields))
       setTasks([...tasksRef.current, task])
       enqueue([upsert(task)])
       return task
@@ -157,20 +167,39 @@ export function useTasks(userId) {
     (id, patch) => {
       const current = tasksRef.current.find((t) => t.id === id)
       if (!current) return
-      const task = { ...current, ...patch }
+      const reanchor =
+        ('due' in patch && patch.due !== current.due) || ('repeat' in patch && !sameRule(patch.repeat, current.repeat))
+      const task = normalize({ ...current, ...patch }, reanchor)
       setTasks(tasksRef.current.map((t) => (t.id === id ? task : t)))
       enqueue([upsert(task)])
     },
     [setTasks, enqueue],
   )
 
+  // Returns an undo function
   const toggleTask = useCallback(
     (id) => {
       const current = tasksRef.current.find((t) => t.id === id)
-      if (!current) return
-      updateTask(id, { done: !current.done, completedAt: current.done ? null : todayKey() })
+      if (!current) return () => {}
+      const today = todayKey()
+      const nextDue = !current.done && current.repeat ? nextDueAfterCompletion(current, today) : null
+
+      if (nextDue) {
+        // Repeating: keep a completed copy for history, move the task to its next date
+        const record = createTask({ ...current, id: newId(), repeat: null, done: true, completedAt: today, createdAt: new Date().toISOString() })
+        const advanced = { ...current, due: nextDue }
+        setTasks([...tasksRef.current.map((t) => (t.id === id ? advanced : t)), record])
+        enqueue([upsert(advanced), upsert(record)])
+        return () => {
+          setTasks(tasksRef.current.filter((t) => t.id !== record.id).map((t) => (t.id === id ? current : t)))
+          enqueue([{ type: 'delete', id: record.id }, upsert(current)])
+        }
+      }
+
+      updateTask(id, { done: !current.done, completedAt: current.done ? null : today })
+      return () => updateTask(id, { done: current.done, completedAt: current.completedAt })
     },
-    [updateTask],
+    [setTasks, enqueue, updateTask],
   )
 
   const deleteTask = useCallback(

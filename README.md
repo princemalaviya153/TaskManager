@@ -44,7 +44,7 @@ Phones only allow installing a PWA from **https** (or localhost), so deploy it f
 
 ## Adding tasks
 
-Below the task box are **Date**, **Time**, **Priority** and **Tags** buttons. Tap one to pick a value
+Below the task box are **Date**, **Time**, **Repeat**, **Priority** and **Tags** buttons. Tap one to pick a value
 (quick choices or a date/time picker, priority levels, existing tags or a new tag). A picked value
 overrides anything typed in the text; tags from both are combined.
 
@@ -56,10 +56,22 @@ You can also type these directly in the task text; they show up as selected in t
 |---|---|
 | Date | `today`, `tomorrow`, `yesterday`, `friday`, `next week`, `in 3 days`, `5 oct`, `oct 5`, `2026-10-05` |
 | Time | `3pm`, `3:30pm`, `at 15:00` (a time with no date means today) |
+| Repeat | `daily`, `every weekday`, `every monday`, `every mon and thu`, `every 2 weeks`, `every other day`, `monthly`, `yearly` |
 | Priority | `!high` `!h` `!1` · `!medium` `!m` `!2` · `!low` `!l` `!3` |
 | Tags | `#work`, `#home` |
 
 Example: `Call dentist tomorrow 3pm #health !high`
+
+### Repeating tasks
+
+Completing a repeating task keeps a completed copy in **Done** and moves the task to its next date
+(an overdue task moves to the next date after today). Monthly tasks on the 29th–31st fall on the last day
+of shorter months. Undo reverts both.
+
+### Search and account
+
+The search button (top right) finds tasks by title, notes or `#tag`. The account button shows sync status
+and has **Change password** and **Sign out**; the sign-in screen has **Forgot password?**.
 
 Tasks added without a date go to **Today** when you're on the Today view, **Tomorrow** on Upcoming, and **Anytime** otherwise.
 
@@ -77,6 +89,7 @@ src/
   lib/sync.js              Supabase fetch/push and row mapping
   lib/supabase.js          Supabase client
   lib/tasks.js             task model, sorting, helpers
+  lib/repeat.js            repeat rules: next occurrence, labels
 supabase/schema.sql        database table, security rules, realtime
 public/icon.svg            source icon; `npm run icons` regenerates the PNG icons
 ```
@@ -84,5 +97,5 @@ public/icon.svg            source icon; `npm run icons` regenerates the PNG icon
 ## Roadmap
 
 - ~~**Phase 2:** accounts and cloud sync (Supabase) so phone and PC share tasks~~ ✅
-- **Phase 3:** recurring tasks, reminders/notifications, Pomodoro timer, weekly stats
+- **Phase 3:** ~~recurring tasks, search, password reset~~ ✅ · reminders/notifications, Pomodoro timer, weekly stats
 - **Phase 4:** AI features (smarter natural-language input, day planner, task breakdown)

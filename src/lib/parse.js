@@ -1,4 +1,5 @@
 import { addDays, toKey } from './dates.js'
+import { firstOccurrence, withAnchorDay } from './repeat.js'
 
 // Parses quick-add text like "Call dentist tomorrow 3pm #health !high"
 // into { title, due, time, priority, tags }.
@@ -7,6 +8,8 @@ import { addDays, toKey } from './dates.js'
 //   dates:     today, tonight, tomorrow/tmr, yesterday, monday..sunday (mon..sun), next week,
 //              in 3 days / in 2 weeks, 2026-10-05, 5 oct / oct 5
 //   times:     3pm, 3:30pm, at 15:00
+//   repeat:    daily, weekly, monthly, yearly, every day, every weekday, every monday,
+//              every mon and thu, every 2 weeks, every other day
 //   priority:  !high !h !1 · !medium !med !m !2 · !low !l !3
 //   tags:      #work #home
 
@@ -30,6 +33,26 @@ const WEEKDAYS = {
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 const MONTH_RE = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+
+const DAY_NAME = '(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tues?|wed|thu(?:rs?)?|fri|sat)'
+const UNIT = { day: 'day', days: 'day', week: 'week', weeks: 'week', month: 'month', months: 'month', year: 'year', years: 'year' }
+
+const REPEAT_RULES = [
+  [/\bevery ?weekdays?\b/i, () => ({ every: 1, unit: 'week', weekdays: [1, 2, 3, 4, 5] })],
+  [new RegExp(String.raw`\bevery (${DAY_NAME}(?:(?:\s*,\s*|\s+and\s+|\s*&\s*)${DAY_NAME})*)\b`, 'i'), (m) => ({
+    every: 1,
+    unit: 'week',
+    weekdays: [...new Set(m[1].toLowerCase().split(/\s*(?:,|\band\b|&)\s*/).map((d) => WEEKDAYS[d.trim()]))].sort(),
+  })],
+  [/\bevery (\d{1,3}|other) (days?|weeks?|months?|years?)\b/i, (m) => ({
+    every: m[1].toLowerCase() === 'other' ? 2 : Math.max(1, Number(m[1])),
+    unit: UNIT[m[2].toLowerCase()],
+  })],
+  [/\b(?:every day|daily)\b/i, () => ({ every: 1, unit: 'day' })],
+  [/\b(?:every week|weekly)\b/i, () => ({ every: 1, unit: 'week' })],
+  [/\b(?:every month|monthly)\b/i, () => ({ every: 1, unit: 'month' })],
+  [/\b(?:every year|yearly|annually)\b/i, () => ({ every: 1, unit: 'year' })],
+]
 
 // Given a month/day with no year, pick the next occurrence (this year or next).
 function upcomingDate(monthIndex, day, now) {
@@ -58,7 +81,7 @@ const DATE_RULES = [
 
 export function parseQuickAdd(input, now = new Date()) {
   let text = ` ${input} `
-  const result = { title: '', due: null, time: null, priority: PRIORITY.NONE, tags: [] }
+  const result = { title: '', due: null, time: null, priority: PRIORITY.NONE, tags: [], repeat: null }
 
   const strip = (match) => {
     text = text.slice(0, match.index) + ' ' + text.slice(match.index + match[0].length)
@@ -93,6 +116,15 @@ export function parseQuickAdd(input, now = new Date()) {
     }
   }
 
+  // Repeat (before dates, so "every monday" isn't read as a single Monday)
+  for (const [re, toRule] of REPEAT_RULES) {
+    const m = text.match(re)
+    if (!m) continue
+    result.repeat = toRule(m)
+    strip(m)
+    break
+  }
+
   // Date: first rule that matches wins
   for (const [re, toDue] of DATE_RULES) {
     const m = text.match(re)
@@ -108,8 +140,10 @@ export function parseQuickAdd(input, now = new Date()) {
     break
   }
 
-  // A time with no date means today
+  // A repeating task starts on its first occurrence; a time with no date means today
+  if (result.repeat && !result.due) result.due = firstOccurrence(result.repeat, toKey(now))
   if (result.time && !result.due) result.due = toKey(now)
+  result.repeat = withAnchorDay(result.repeat, result.due)
 
   result.title = text.replace(/\s+/g, ' ').trim() || input.trim()
   return result

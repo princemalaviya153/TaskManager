@@ -20,6 +20,7 @@ export function createTask(fields) {
     time: null,
     priority: 0,
     tags: [],
+    repeat: null,
     done: false,
     completedAt: null,
     createdAt: new Date().toISOString(),

@@ -3,18 +3,20 @@ import { parseQuickAdd } from '../lib/parse'
 import { addDays, formatDay, formatTime, fromKey, toKey } from '../lib/dates'
 import { parseTagInput } from '../lib/tasks'
 import { PRIORITY_OPTIONS, priorityStyle } from './priority'
-import { CalendarIcon, ClockIcon, FlagIcon, PlusIcon, TagIcon, XIcon } from './Icons'
+import { CalendarIcon, ClockIcon, FlagIcon, PlusIcon, RepeatIcon, TagIcon } from './Icons'
+import RepeatPicker from './RepeatPicker'
+import { describeRepeat, firstOccurrence } from '../lib/repeat'
 
 // Values picked with the toolbar override what was typed in the text
 // (undefined = not picked). Tags from both sources are combined.
-const EMPTY_PICKS = { due: undefined, time: undefined, priority: undefined, tags: [], removedTags: [] }
+const EMPTY_PICKS = { due: undefined, time: undefined, priority: undefined, repeat: undefined, tags: [], removedTags: [] }
 
 const TIME_PRESETS = ['09:00', '12:00', '15:00', '18:00', '20:00']
 
 export default function QuickAdd({ onAdd, today, defaultDue, allTags }) {
   const [value, setValue] = useState('')
   const [picks, setPicks] = useState(EMPTY_PICKS)
-  const [panel, setPanel] = useState(null) // 'date' | 'time' | 'priority' | 'tags' | null
+  const [panel, setPanel] = useState(null) // 'date' | 'time' | 'repeat' | 'priority' | 'tags' | null
   const [newTag, setNewTag] = useState('')
 
   const parsed = useMemo(() => parseQuickAdd(value), [value])
@@ -22,7 +24,11 @@ export default function QuickAdd({ onAdd, today, defaultDue, allTags }) {
   // What the task will actually be created with
   const tags = [...new Set([...parsed.tags, ...picks.tags])].filter((t) => !picks.removedTags.includes(t))
   const time = picks.time !== undefined ? picks.time : parsed.time
+  const repeat = picks.repeat !== undefined ? picks.repeat : parsed.repeat
+  const dateChosen = picks.due !== undefined || parsed.due
   let due = picks.due !== undefined ? picks.due : (parsed.due ?? defaultDue)
+  // A repeating task starts on the rule's first matching day unless a date was chosen
+  if (repeat && (!dateChosen || !due)) due = firstOccurrence(repeat, today)
   if (time && !due) due = today
   const priority = picks.priority ?? parsed.priority
   const canSubmit = value.trim().length > 0
@@ -51,7 +57,7 @@ export default function QuickAdd({ onAdd, today, defaultDue, allTags }) {
   const submit = (e) => {
     e.preventDefault()
     if (!canSubmit) return
-    onAdd({ title: parsed.title, due, time, priority, tags })
+    onAdd({ title: parsed.title, due, time, priority, tags, repeat })
     setValue('')
     setPicks(EMPTY_PICKS)
     setPanel(null)
@@ -100,6 +106,9 @@ export default function QuickAdd({ onAdd, today, defaultDue, allTags }) {
         </ToolButton>
         <ToolButton icon={ClockIcon} active={panel === 'time'} set={!!time} onClick={() => togglePanel('time')}>
           {time ? formatTime(time) : 'Time'}
+        </ToolButton>
+        <ToolButton icon={RepeatIcon} active={panel === 'repeat'} set={!!repeat} onClick={() => togglePanel('repeat')}>
+          {repeat ? describeRepeat(repeat) : 'Repeat'}
         </ToolButton>
         <ToolButton
           icon={FlagIcon}
@@ -155,6 +164,8 @@ export default function QuickAdd({ onAdd, today, defaultDue, allTags }) {
               )}
             </div>
           )}
+
+          {panel === 'repeat' && <RepeatPicker value={repeat} onChange={(rule) => update({ repeat: rule })} />}
 
           {panel === 'priority' && (
             <div className="grid grid-cols-4 gap-1.5">

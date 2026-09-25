@@ -3,6 +3,8 @@ import { addDays, toKey } from '../lib/dates'
 import { parseTagInput } from '../lib/tasks'
 import { PRIORITY_OPTIONS } from './priority'
 import { TrashIcon, XIcon } from './Icons'
+import RepeatPicker from './RepeatPicker'
+import { firstOccurrence } from '../lib/repeat'
 
 export default function EditTaskSheet({ task, onSave, onDelete, onClose }) {
   const [form, setForm] = useState(() => ({
@@ -11,6 +13,7 @@ export default function EditTaskSheet({ task, onSave, onDelete, onClose }) {
     due: task.due ?? '',
     time: task.time ?? '',
     priority: task.priority,
+    repeat: task.repeat ?? null,
     tags: task.tags.map((t) => `#${t}`).join(' '),
   }))
 
@@ -33,7 +36,8 @@ export default function EditTaskSheet({ task, onSave, onDelete, onClose }) {
     onSave(task.id, {
       title,
       notes: form.notes.trim(),
-      due: form.due || null,
+      due: form.due || (form.repeat ? firstOccurrence(form.repeat, toKey(new Date())) : null),
+      repeat: form.repeat,
       time: form.time || null,
       priority: form.priority,
       tags: parseTagInput(form.tags),
@@ -98,6 +102,11 @@ export default function EditTaskSheet({ task, onSave, onDelete, onClose }) {
               <input type="date" aria-label="Due date" className={input} value={form.due} onChange={set('due')} />
               <input type="time" aria-label="Due time" className={input} value={form.time} onChange={set('time')} disabled={!form.due} />
             </div>
+          </div>
+
+          <div>
+            <span className={label}>Repeat</span>
+            <RepeatPicker value={form.repeat} onChange={(rule) => setForm((f) => ({ ...f, repeat: rule }))} />
           </div>
 
           <div>

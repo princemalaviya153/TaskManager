@@ -1,11 +1,12 @@
 import { formatDay, formatTime } from '../lib/dates'
 import { priorityStyle } from './priority'
-import { CheckIcon, NoteIcon } from './Icons'
+import { CheckIcon, NoteIcon, RepeatIcon } from './Icons'
+import { describeRepeat } from '../lib/repeat'
 
 export default function TaskItem({ task, today, onToggle, onOpen, showDate = true }) {
   const p = priorityStyle(task.priority)
   const overdue = !task.done && task.due && task.due < today
-  const showMeta = (showDate && task.due) || task.time || task.tags.length > 0 || task.notes
+  const showMeta = (showDate && task.due) || task.time || task.repeat || task.tags.length > 0 || task.notes
 
   return (
     <li className="group flex items-start gap-3 px-4 py-3">
@@ -28,6 +29,12 @@ export default function TaskItem({ task, today, onToggle, onOpen, showDate = tru
               <span className={overdue ? 'font-medium text-red-600 dark:text-red-400' : ''}>{formatDay(task.due, today)}</span>
             )}
             {task.time && <span>{formatTime(task.time)}</span>}
+            {task.repeat && (
+              <span className="inline-flex items-center gap-1">
+                <RepeatIcon width={12} height={12} />
+                {describeRepeat(task.repeat)}
+              </span>
+            )}
             {task.notes && <NoteIcon width={13} height={13} aria-label="Has notes" />}
             {task.tags.map((t) => (
               <span key={t} className="text-indigo-600 dark:text-indigo-400">#{t}</span>

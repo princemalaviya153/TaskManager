@@ -2,21 +2,26 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 
 export default function AuthScreen() {
-  const [mode, setMode] = useState('signin') // 'signin' | 'signup'
+  const [mode, setMode] = useState('signin') // 'signin' | 'signup' | 'reset'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [sentTo, setSentTo] = useState('')
+  const [sent, setSent] = useState(null) // { email, kind: 'confirm' | 'reset' }
 
   const signup = mode === 'signup'
+  const reset = mode === 'reset'
 
   const submit = async (e) => {
     e.preventDefault()
     setBusy(true)
     setError('')
     try {
-      if (signup) {
+      if (reset) {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+        if (error) throw error
+        setSent({ email, kind: 'reset' })
+      } else if (signup) {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -24,7 +29,7 @@ export default function AuthScreen() {
         })
         if (error) throw error
         // No session means Supabase wants the email confirmed first
-        if (!data.session) setSentTo(email)
+        if (!data.session) setSent({ email, kind: 'confirm' })
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
@@ -48,17 +53,20 @@ export default function AuthScreen() {
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Your tasks, synced across phone and computer.</p>
         </div>
 
-        {sentTo ? (
+        {sent ? (
           <div className="rounded-2xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
             <p className="font-medium">Check your email</p>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              We sent a confirmation link to <span className="font-medium text-slate-700 dark:text-slate-200">{sentTo}</span>.
-              Open it to activate your account, then sign in here.
+              We sent a {sent.kind === 'reset' ? 'password reset' : 'confirmation'} link to{' '}
+              <span className="font-medium text-slate-700 dark:text-slate-200">{sent.email}</span>.{' '}
+              {sent.kind === 'reset'
+                ? 'Open it on this device to choose a new password.'
+                : 'Open it to activate your account, then sign in here.'}
             </p>
             <button
               type="button"
               onClick={() => {
-                setSentTo('')
+                setSent(null)
                 setMode('signin')
               }}
               className="mt-5 w-full rounded-xl bg-indigo-600 py-3 font-medium text-white hover:bg-indigo-500"
@@ -71,7 +79,10 @@ export default function AuthScreen() {
             onSubmit={submit}
             className="space-y-3 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800"
           >
-            <h2 className="text-lg font-semibold">{signup ? 'Create your account' : 'Sign in'}</h2>
+            <h2 className="text-lg font-semibold">{reset ? 'Reset your password' : signup ? 'Create your account' : 'Sign in'}</h2>
+            {reset && (
+              <p className="text-sm text-slate-500 dark:text-slate-400">Enter your email and we'll send you a link to choose a new password.</p>
+            )}
             <input
               type="email"
               required
@@ -82,7 +93,7 @@ export default function AuthScreen() {
               onChange={(e) => setEmail(e.target.value)}
               className={input}
             />
-            <input
+            {!reset && <input
               type="password"
               required
               minLength={6}
@@ -92,7 +103,19 @@ export default function AuthScreen() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className={input}
-            />
+            />}
+            {mode === 'signin' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('reset')
+                  setError('')
+                }}
+                className="text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+              >
+                Forgot password?
+              </button>
+            )}
             {error && (
               <p role="alert" className="text-sm text-red-600 dark:text-red-400">
                 {error}
@@ -103,19 +126,19 @@ export default function AuthScreen() {
               disabled={busy}
               className="w-full rounded-xl bg-indigo-600 py-3 font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
             >
-              {busy ? 'Please wait…' : signup ? 'Create account' : 'Sign in'}
+              {busy ? 'Please wait…' : reset ? 'Send reset link' : signup ? 'Create account' : 'Sign in'}
             </button>
             <p className="pt-1 text-center text-sm text-slate-500 dark:text-slate-400">
-              {signup ? 'Already have an account?' : 'New here?'}{' '}
+              {mode === 'signin' ? 'New here?' : signup ? 'Already have an account?' : 'Remembered it?'}{' '}
               <button
                 type="button"
                 onClick={() => {
-                  setMode(signup ? 'signin' : 'signup')
+                  setMode(mode === 'signin' ? 'signup' : 'signin')
                   setError('')
                 }}
                 className="font-medium text-indigo-600 hover:underline dark:text-indigo-400"
               >
-                {signup ? 'Sign in' : 'Create an account'}
+                {mode === 'signin' ? 'Create an account' : 'Sign in'}
               </button>
             </p>
           </form>
