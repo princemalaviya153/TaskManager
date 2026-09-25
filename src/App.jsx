@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTasks, useToday } from './hooks/useTasks'
 import { compareTasks, groupBy } from './lib/tasks'
 import { addDays, formatDay, formatLongDate, fromKey, toKey } from './lib/dates'
@@ -6,6 +6,9 @@ import QuickAdd from './components/QuickAdd'
 import TaskSection from './components/TaskSection'
 import EditTaskSheet from './components/EditTaskSheet'
 import Toast from './components/Toast'
+import AccountMenu from './components/AccountMenu'
+import { supabase } from './lib/supabase'
+import { clearUserData } from './lib/storage'
 import { CalendarIcon, CheckCircleIcon, InboxIcon, SunIcon } from './components/Icons'
 
 const VIEWS = [
@@ -21,14 +24,38 @@ function viewOf(task, today) {
   return task.due <= today ? 'today' : 'upcoming'
 }
 
-export default function App() {
-  const { tasks, addTask, updateTask, toggleTask, deleteTask, restoreTask, clearCompleted } = useTasks()
+export default function App({ user }) {
+  const {
+    tasks,
+    status,
+    notice,
+    dismissNotice,
+    hasPending,
+    addTask,
+    updateTask,
+    toggleTask,
+    deleteTask,
+    restoreTask,
+    clearCompleted,
+  } = useTasks(user.id)
   const today = useToday()
   const [view, setView] = useState('today')
   const [tag, setTag] = useState(null)
   const [editing, setEditing] = useState(null)
   const [toast, setToast] = useState(null)
   const dismissToast = useCallback(() => setToast(null), [])
+
+  useEffect(() => {
+    if (!notice) return
+    setToast({ message: notice })
+    dismissNotice()
+  }, [notice, dismissNotice])
+
+  const signOut = async () => {
+    if (hasPending() && !confirm("Some changes haven't synced yet and will be lost if you sign out now. Sign out anyway?")) return
+    clearUserData(user.id)
+    await supabase.auth.signOut()
+  }
 
   const allTags = useMemo(() => [...new Set(tasks.flatMap((t) => t.tags))].sort(), [tasks])
   const activeTag = tag && allTags.includes(tag) ? tag : null
@@ -117,9 +144,12 @@ export default function App() {
       </nav>
 
       <main className="mx-auto w-full max-w-2xl px-4 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-12">
-        <header className="mb-4">
-          <h1 className="text-2xl font-bold tracking-tight">{current.label}</h1>
-          {view === 'today' && <p className="text-sm text-slate-500 dark:text-slate-400">{formatLongDate(today)}</p>}
+        <header className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">{current.label}</h1>
+            {view === 'today' && <p className="text-sm text-slate-500 dark:text-slate-400">{formatLongDate(today)}</p>}
+          </div>
+          <AccountMenu email={user.email} status={status} onSignOut={signOut} />
         </header>
 
         {view !== 'done' && <QuickAdd onAdd={handleAdd} today={today} defaultDue={defaultDue} allTags={allTags} />}

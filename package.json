@@ -10,6 +10,7 @@
     "icons": "pwa-assets-generator --preset minimal-2023 public/icon.svg"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.117.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

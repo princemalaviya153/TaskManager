@@ -1,53 +1,216 @@
-import { useCallback, useEffect, useState } from 'react'
-import { STORAGE_KEY, loadTasks, saveTasks } from '../lib/storage'
-import { createTask } from '../lib/tasks'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  clearLegacyTasks,
+  loadCache,
+  loadLegacyTasks,
+  loadPending,
+  saveCache,
+  savePending,
+} from '../lib/storage'
+import { applyPending, fetchTasks, pushOps } from '../lib/sync'
+import { supabase } from '../lib/supabase'
+import { createTask, isUuid, newId } from '../lib/tasks'
 import { todayKey } from '../lib/dates'
 
-export function useTasks() {
-  const [tasks, setTasks] = useState(loadTasks)
+const RETRY_MS = 15_000
 
-  useEffect(() => saveTasks(tasks), [tasks])
+const upsert = (task) => ({ type: 'upsert', id: task.id, task })
 
-  // Keep multiple open tabs in sync
-  useEffect(() => {
-    const onStorage = (e) => {
-      if (e.key === STORAGE_KEY) setTasks(loadTasks())
+// Local-first task list for one account: every change is applied on the device
+// immediately, queued, and pushed to Supabase in the background. Changes made
+// on other devices arrive through realtime events and on refocus.
+//
+// status: 'syncing' | 'synced' | 'offline' | 'error'
+export function useTasks(userId) {
+  const [tasks, setTasksState] = useState(() => loadCache(userId))
+  const [status, setStatus] = useState('syncing')
+  const [notice, setNotice] = useState(null)
+
+  const tasksRef = useRef(tasks)
+  const pendingRef = useRef(loadPending(userId))
+  const flushingRef = useRef(false)
+  const retryRef = useRef(null)
+
+  const setTasks = useCallback(
+    (next) => {
+      tasksRef.current = next
+      setTasksState(next)
+      saveCache(userId, next)
+    },
+    [userId],
+  )
+
+  const hasPending = useCallback(() => Object.keys(pendingRef.current).length > 0, [])
+
+  const fail = useCallback((err) => {
+    console.error('Sync failed', err)
+    setStatus(navigator.onLine ? 'error' : 'offline')
+  }, [])
+
+  const refresh = useCallback(async () => {
+    if (!navigator.onLine) return setStatus('offline')
+    try {
+      const server = await fetchTasks()
+      setTasks(applyPending(server, pendingRef.current))
+      if (!flushingRef.current) setStatus(hasPending() ? 'syncing' : 'synced')
+    } catch (err) {
+      fail(err)
     }
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  }, [setTasks, hasPending, fail])
 
-  const addTask = useCallback((fields) => {
-    const task = createTask(fields)
-    setTasks((prev) => [...prev, task])
-    return task
-  }, [])
+  const flush = useCallback(async () => {
+    if (flushingRef.current) return
+    clearTimeout(retryRef.current)
+    if (!hasPending()) return
+    if (!navigator.onLine) return setStatus('offline')
 
-  const updateTask = useCallback((id, patch) => {
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
-  }, [])
+    flushingRef.current = true
+    setStatus('syncing')
+    try {
+      // Keep going while new changes are queued during a push
+      while (hasPending()) {
+        const ops = Object.values(pendingRef.current)
+        await pushOps(ops, userId)
+        for (const op of ops) {
+          // Only drop the op if it wasn't replaced by a newer change meanwhile
+          if (pendingRef.current[op.id]?.seq === op.seq) delete pendingRef.current[op.id]
+        }
+        savePending(userId, pendingRef.current)
+      }
+      flushingRef.current = false
+      setStatus('synced')
+      refresh()
+    } catch (err) {
+      flushingRef.current = false
+      fail(err)
+      retryRef.current = setTimeout(() => flushRef.current(), RETRY_MS)
+    }
+  }, [userId, hasPending, fail, refresh])
 
-  const toggleTask = useCallback((id) => {
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id ? { ...t, done: !t.done, completedAt: t.done ? null : todayKey() } : t,
-      ),
-    )
-  }, [])
+  const flushRef = useRef(flush)
+  flushRef.current = flush
 
-  const deleteTask = useCallback((id) => {
-    setTasks((prev) => prev.filter((t) => t.id !== id))
-  }, [])
+  const enqueue = useCallback(
+    (ops) => {
+      for (const op of ops) pendingRef.current[op.id] = { ...op, seq: newId() }
+      savePending(userId, pendingRef.current)
+      flushRef.current()
+    },
+    [userId],
+  )
 
-  const restoreTask = useCallback((task) => {
-    setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [...prev, task]))
-  }, [])
+  useEffect(() => {
+    // Move tasks created before accounts existed (Phase 1) into this account
+    const legacy = loadLegacyTasks()
+    if (legacy.length) {
+      const moved = legacy.map((t) => (isUuid(t.id) ? t : { ...t, id: newId() }))
+      const ids = new Set(moved.map((t) => t.id))
+      setTasks([...tasksRef.current.filter((t) => !ids.has(t.id)), ...moved])
+      enqueue(moved.map(upsert))
+      clearLegacyTasks()
+      setNotice(`Moved ${moved.length} task${moved.length > 1 ? 's' : ''} from this device into your account`)
+    }
+
+    refresh().then(() => flushRef.current())
+
+    // Another device changed something -> refetch (debounced)
+    let refetchTimer
+    const channel = supabase
+      .channel(`tasks-${userId}-${newId()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
+        clearTimeout(refetchTimer)
+        refetchTimer = setTimeout(refresh, 300)
+      })
+      .subscribe()
+
+    const catchUp = () => {
+      flushRef.current()
+      refresh()
+    }
+    const onVisible = () => document.visibilityState === 'visible' && catchUp()
+    const onOffline = () => setStatus('offline')
+    window.addEventListener('online', catchUp)
+    window.addEventListener('offline', onOffline)
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      clearTimeout(refetchTimer)
+      clearTimeout(retryRef.current)
+      supabase.removeChannel(channel)
+      window.removeEventListener('online', catchUp)
+      window.removeEventListener('offline', onOffline)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [userId, refresh, enqueue, setTasks])
+
+  const addTask = useCallback(
+    (fields) => {
+      const task = createTask(fields)
+      setTasks([...tasksRef.current, task])
+      enqueue([upsert(task)])
+      return task
+    },
+    [setTasks, enqueue],
+  )
+
+  const updateTask = useCallback(
+    (id, patch) => {
+      const current = tasksRef.current.find((t) => t.id === id)
+      if (!current) return
+      const task = { ...current, ...patch }
+      setTasks(tasksRef.current.map((t) => (t.id === id ? task : t)))
+      enqueue([upsert(task)])
+    },
+    [setTasks, enqueue],
+  )
+
+  const toggleTask = useCallback(
+    (id) => {
+      const current = tasksRef.current.find((t) => t.id === id)
+      if (!current) return
+      updateTask(id, { done: !current.done, completedAt: current.done ? null : todayKey() })
+    },
+    [updateTask],
+  )
+
+  const deleteTask = useCallback(
+    (id) => {
+      setTasks(tasksRef.current.filter((t) => t.id !== id))
+      enqueue([{ type: 'delete', id }])
+    },
+    [setTasks, enqueue],
+  )
+
+  const restoreTask = useCallback(
+    (task) => {
+      if (tasksRef.current.some((t) => t.id === task.id)) return
+      setTasks([...tasksRef.current, task])
+      enqueue([upsert(task)])
+    },
+    [setTasks, enqueue],
+  )
 
   const clearCompleted = useCallback(() => {
-    setTasks((prev) => prev.filter((t) => !t.done))
-  }, [])
+    const done = tasksRef.current.filter((t) => t.done)
+    setTasks(tasksRef.current.filter((t) => !t.done))
+    enqueue(done.map((t) => ({ type: 'delete', id: t.id })))
+  }, [setTasks, enqueue])
 
-  return { tasks, addTask, updateTask, toggleTask, deleteTask, restoreTask, clearCompleted }
+  const dismissNotice = useCallback(() => setNotice(null), [])
+
+  return {
+    tasks,
+    status,
+    notice,
+    dismissNotice,
+    hasPending,
+    addTask,
+    updateTask,
+    toggleTask,
+    deleteTask,
+    restoreTask,
+    clearCompleted,
+  }
 }
 
 // Re-renders when the date changes (app left open overnight, or reopened from the home screen)
