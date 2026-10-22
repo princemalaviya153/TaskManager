@@ -2,3 +2,15 @@ node_modules
 dist
 dev-dist
 *.local
+
+# OS Bridge & Git Helper Files
+Project-Packager/Git-Bridge/
+install_git_bridge.bat
+run_git_commit.bat
+sync_git_log.bat
+run_bridge_silent.vbs
+git_log.json
+.git_log.json
+.bridge_installed.json
+git_commit_request.json
+git_commit_result.json
