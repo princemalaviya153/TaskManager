@@ -1,0 +1,5 @@
+Type,Discipline,Path,SearchPattern,Comments
+Storage,Correction Logs,doc/designs/correction_logs,,
+Project,Hardware,src/hardware/pcb,*.PrjPcb,
+Project,Firmware,src/firmware,src_*,
+Project,Mechanical,src/hardware/mech_design,src_*,
