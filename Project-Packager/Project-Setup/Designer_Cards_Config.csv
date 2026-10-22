@@ -1,0 +1,16 @@
+Card,Parameter,Type,Options,Tooltip,Placeholder
+Firmware,Firmware Quality Level,range,1-5,1-5 index for firmware robustness and fault tolerance.,
+Firmware,Firmware Commenting,select,Minimal;Standard;Extensive,Depth and completeness of code comments.,
+Firmware,Firmware Reusability,select,Low;Medium;High,Modularity and cross-platform reusability profile.,
+Firmware,Certifications,tags,,Firmware safety and compliance certifications.,Type Firmware Certifications
+Hardware,Hardware Schematic Quality,range,1-5,1-5 index for schematic rigor and net naming completeness.,
+Hardware,Hardware PCB Compactness,range,1-5,1-5 index for layout density and packaging constraints.,
+Hardware,Hardware Compactness vs PCB Cost,range,1-5,1 prioritizes low manufacturing cost, 5 prioritizes high density.,
+Hardware,Hardware DRC Tightness,select,Loose;Standard;Strict,Design Rule Check strictness profile.,
+Hardware,Hardware Mfg Consideration,select,MMFG;Proto;High Quality Low Quantity,Manufacturing priority profile.,
+Hardware,Certifications,tags,,Hardware and PCB specific certifications.,Type Hardware Certifications
+Mechanical,Mechanical Cost vs Quality,range,1-5,1 prioritizes low cost, 5 prioritizes high quality.,
+Mechanical,Mechanical Mfg Method,select,3D Print;CNC;Injection Mold;Add New,Primary manufacturing method for mechanical parts.,
+Mechanical,Mechanical Mfg Level,select,Prototype;Standard;Production,Target production level.,
+Mechanical,Mechanical Mfg Consideration,select,MMFG;Proto;High Quality Low Quantity,Manufacturing priority profile.,
+Mechanical,Certifications,tags,,Mechanical enclosure and tooling certifications.,Type Mechanical Certifications
